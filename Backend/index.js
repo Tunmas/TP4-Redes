@@ -9,7 +9,7 @@ const multer = require('multer');
 const totp = require('./totp.js');
 const pdfParse = require('pdf-parse'); // Para procesar PDF
 const XLSX = require('xlsx'); // Para procesar Excel
-const { GoogleGenerativeAI } = require('@google/generative-ai'); // Importar la API de Google Generative AI
+const { GoogleGenerativeAI, GoogleGenerativeAIFetchError } = require('@google/generative-ai'); // Importar la API de Google Generative AI
 
 // Crea una instancia de GoogleGenerativeAI fuera de la función
 const API_KEY = process.env.GOOGLE_API_KEY; // Obtén la clave de API desde las variables de entorno
@@ -85,20 +85,41 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
             return res.status(400).json({ message: 'Unsupported file type' });
         }
     } catch (error) {
-        console.error('Error processing file:', error);
-        res.status(500).json({ message: 'Error processing file' });
+        if (error instanceof GoogleGenerativeAIFetchError) {
+            console.error('Error al generar contenido:', error);
+            res.status(500).json({ message: 'Error al analizar los datos. Por favor, verifica tu conexión a internet y tu clave de API.' });
+        } else {
+            console.error('Error processing file:', error);
+            res.status(500).json({ message: 'Error processing file' });
+        }
     }
 });
 
 // Función para analizar los datos con Gemini
 async function analyzeDataWithGemini(data) {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" });
-    const prompt = `Analiza los siguientes datos y proporciona un resumen conciso: ${data}`; // Ajusta el prompt para el texto del PDF
+    const prompt = `Analiza los siguientes datos de ventas y proporciona un resumen conciso en formato HTML, incluyendo listas, gráficos de barras y estilos:
+
+Utiliza CSS y Bootstrap para crear un diseño atractivo y moderno. 
+
+**Ejemplo de estilos:**
+
+- Centra el contenido de las celdas de la tabla.
+- Usa un estilo de tabla de Bootstrap (por ejemplo, \`table-striped\`, \`table-hover\`).
+- Aplica un estilo de gráfico de barras de Bootstrap (por ejemplo, \`bg-primary\`, \`text-white\`).
+
+Solamente y nada más responde con el análisis, no quiero explicación de lo que hiciste ni nada:
+
+${data}`;
+
+
+    
+
 
     try {
         const result = await model.generateContent(prompt);
         const response = await result.response;
-        return response.text();
+        return response.text(); // La respuesta ya es HTML, no necesita ser formateada
     } catch (error) {
         console.error('Error al generar contenido:', error);
         return 'Error al analizar los datos. Por favor, verifica tu conexión a internet y tu clave de API.';
