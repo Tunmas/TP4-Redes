@@ -9,6 +9,11 @@ const multer = require('multer');
 const totp = require('./totp.js');
 const pdfParse = require('pdf-parse'); // Para procesar PDF
 const XLSX = require('xlsx'); // Para procesar Excel
+const { GoogleGenerativeAI } = require('@google/generative-ai'); // Importar la API de Google Generative AI
+
+// Crea una instancia de GoogleGenerativeAI fuera de la función
+const API_KEY = process.env.GOOGLE_API_KEY; // Obtén la clave de API desde las variables de entorno
+const genAI = new GoogleGenerativeAI(API_KEY);
 
 const app = express();
 app.use(cors());
@@ -60,14 +65,22 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
         if (fileType === 'application/pdf') {
             // Procesar PDF
             const data = await pdfParse(file.buffer);
-            res.json({ message: 'PDF processed successfully', content: data.text });
+            const analysis = await analyzeDataWithGemini(data.text); // Analizar el texto del PDF
+            res.json({ message: 'PDF processed successfully', content: data.text, analysis: analysis });
         } else if (fileType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || fileType === 'application/vnd.ms-excel') {
             // Procesar Excel
             const workbook = XLSX.read(file.buffer, { type: 'buffer' });
             const sheetName = workbook.SheetNames[0]; // Usamos la primera hoja
             const sheet = workbook.Sheets[sheetName];
             const data = XLSX.utils.sheet_to_json(sheet);
-            res.json({ message: 'Excel processed successfully', content: data });
+
+            // Convertir el array de objetos a una tabla
+            const tableData = data.map(row => Object.entries(row).map(([key, value]) => `${key}: ${value}`).join(', ')).join('\n');
+
+            // Invocar a Gemini para el análisis
+            const analysis = await analyzeDataWithGemini(tableData);
+
+            res.json({ message: 'Excel processed successfully', content: data, analysis: analysis });
         } else {
             return res.status(400).json({ message: 'Unsupported file type' });
         }
@@ -76,6 +89,21 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
         res.status(500).json({ message: 'Error processing file' });
     }
 });
+
+// Función para analizar los datos con Gemini
+async function analyzeDataWithGemini(data) {
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" });
+    const prompt = `Analiza los siguientes datos y proporciona un resumen conciso: ${data}`; // Ajusta el prompt para el texto del PDF
+
+    try {
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        return response.text();
+    } catch (error) {
+        console.error('Error al generar contenido:', error);
+        return 'Error al analizar los datos. Por favor, verifica tu conexión a internet y tu clave de API.';
+    }
+}
 
 // Middleware de manejo de errores
 app.use((err, req, res, next) => {
